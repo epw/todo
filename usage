@@ -1,0 +1,82 @@
+$ todo list
+
+----------
+VERY LONG-TERM GOAL
+must be done in the next decade
+Description
+----------
+
+----------
+LONG-TERM GOAL
+this year
+Description
+----------
+
+----------
+HOMEWORK
+next week
+Book, page, problems
+----------
+
+----------
+PROJECT: GAME
+ongoing
+Description
+----------
+
+----------
+PROJECT: WAVE
+ongoing
+Description
+----------
+
+$ cat new
+(some kind of fancy Lisp structure)
+$ todo push < new
+$ todo pop
+----------
+PROJECT: NEW
+short-term
+Description
+----------
+
+Finished with new? y
+$ todo pop -n
+----------
+PROJECT: WAVE
+ongoing
+Description
+----------
+
+$ todo cycle
+$ todo list
+
+----------
+VERY LONG-TERM GOAL
+must be done in the next decade
+Description
+----------
+
+----------
+LONG-TERM GOAL
+this year
+Description
+----------
+
+----------
+HOMEWORK
+next week
+Book, page, problems
+----------
+
+----------
+PROJECT: WAVE
+ongoing
+Description
+----------
+
+----------
+PROJECT: GAME
+ongoing
+Description
+----------
