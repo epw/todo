@@ -162,7 +162,8 @@
       (in-package :todo)
       (let ((todo-list (eric:read-from-file (place "/list"))))
 	(push (read-from-string arg) todo-list)
-	(eric:overwrite-to-file (place "/list") "~s~%" todo-list)))))
+	(eric:overwrite-to-file (place "/list") "~s~%" todo-list)))
+    todo-item))
 
 (defun todo-pop (&optional keep)
   "Pop an item off of the stack, and print it. With the keep option, does not truly perform a pop operation, by leaving the item on the stack."
@@ -187,10 +188,16 @@
 (defun todo-cycle (arg)
   "Move the top item arg spaces back in the stack."
   (let ((todo-list (eric:read-from-file (place "/list"))))
+    (if (>= arg (length todo-list)) (setf arg (1- (length todo-list))))
     (eric:overwrite-to-file (place "/list") "~s~%" (eric:insert
 						    (first todo-list)
 						    (rest todo-list)
 						    arg))))
+
+(defun todo-save (arg)
+  "Put a new todo-item onto the bottom of the stack. Uses TODO-PUSH to get the new item, then TODO-CYCLE to put it on the bottom."
+  (todo-push arg)
+  (todo-cycle (1- (length (eric:read-from-file (place "/list"))))))
 
 (defun todo-pull (arg)
   "Pull named item to top of stack."
