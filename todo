@@ -132,7 +132,7 @@
     ()))
 
 (defun parse-todo-item (string)
-  "Parse at least four lines from *STANDARD-INPUT* to create a todo-item. The four lines are not Lisp code."
+  "Parse at least four newline-separated line to create a todo-item. The four lines are not Lisp code."
   (let ((pieces (eric:split string (format nil "~%") 3)))
     (let ((name (first pieces))
 	  (deadline (let ((time (translate-time (second pieces))))
@@ -144,8 +144,13 @@
 (defun todo-push (arg)
   "Push a new todo-item onto the stack. The argument is used as the name of the item, and parse-todo-item builds the structure itself."
   (let* ((control-c nil)
+	 (prompts (list "Item name" "Deadline" "Tags" "Description"))
 	 (todo-string (with-output-to-string (s)
-			(handler-case (loop (format s "~a~%" (read-line)))
+			(handler-case (loop
+					 (if prompts
+					     (format t "~a> " (pop prompts)))
+					 (finish-output)
+					 (format s "~a~%" (read-line)))
 			  (end-of-file () ())
 			  (sb-sys:interactive-interrupt ()
 			    (setf control-c t)))))
