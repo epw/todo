@@ -9,7 +9,7 @@
 ;; This is a specialized to-do list tailored to how my mind works.
 ;; It is implemented as a stack, so that new ideas go to the top, and
 ;; push other ones down. Slight breaking of a true stack is possible,
-;; through the "cycle" and "pull" commands.
+;; through the "cycle", "pull", and "save" commands.
 ;;
 ;; The program runs and terminates in small bursts, and does not contain
 ;; a persistent daemon. Data is stored in files in the *ROOT* directory.
@@ -230,6 +230,7 @@
       (format-tabbed t "pop [-n] - Pop from stack (-n only displays, does not remove)~%")
       (format-tabbed t "cycle [number] - Put top item [number] levels back~%")
       (format-tabbed t "pull [item] - Pull named item to top of stack.~%")
+      (format-tabbed t "save [item] - Put item on bottom of stack (read from stdin).~%")
       (format-tabbed t "finish [item] - Finish named item (remove from stack).~%")))
   (if quit (sb-ext:quit)))
 
@@ -255,6 +256,8 @@
 	 (todo-cycle (parse-integer (or (first argv) "1"))))
 	(pull
 	 (todo-pull (read-from-string (first argv))))
+	(save
+	 (todo-save (first argv)))
 	(finish
 	 (todo-finish (read-from-string (first argv))))
 	(t (usage t)))
