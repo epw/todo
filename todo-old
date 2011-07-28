@@ -1,0 +1,268 @@
+#! /home/eric/bin/lisp
+
+;; Copyright (C) Eric Willisson 2011
+;; This program uses the GPL; see http://www.gnu.org/copyleft/gpl.html
+;; for details
+
+;; To-Do Stack
+;;
+;; This is a specialized to-do list tailored to how my mind works.
+;; It is implemented as a stack, so that new ideas go to the top, and
+;; push other ones down. Slight breaking of a true stack is possible,
+;; through the "cycle" and "pull" commands.
+;;
+;; The program runs and terminates in small bursts, and does not contain
+;; a persistent daemon. Data is stored in files in the *ROOT* directory.
+;; *ROOT*/list contains the stack itself, a list of symbols representing
+;; filenames. The files contain PRINT-ed Lisp data representing todo-item
+;; instances.
+
+;; This program is written according to the UNIX philosophy. It works
+;; with text streams, and should easily be integrated into other
+;; programs.
+
+(defpackage :todo
+  (:use :cl)
+  (:export :main
+	   :todo-item))
+
+(in-package :todo)
+
+(defvar *ROOT* "/var/local/todo" "The root path where the program's data is stored.")
+
+(defun place (&rest parts)
+  "Concatenate pathname parts and return a useable path to a particular file or directory."
+   (format nil "~{~a~}" (cons *ROOT* parts)))
+
+(defstruct todo-item name deadline tags desc)
+
+(defun load-todo-item (identifier)
+  "Using identifier as the filename, load a todo-item and return it."
+  (let ((pathname (place (format nil "/~(~a~)" identifier))))
+    (when (probe-file pathname)
+      (eric:read-from-file pathname))))
+
+(defun display-deadline (deadline)
+  "Translate from an input, normally a number of seconds since the epoch, to a date and time. Also takes NIL to return \"No particular deadline\", or a string or symbol to return directly."
+  (typecase deadline
+    (null "No particular deadline")
+    (number (multiple-value-bind (second minute hour date month year
+					 day-of-week dst-p tz)
+		(decode-universal-time deadline)
+	      (declare (ignore dst-p tz))
+	      (format nil "~a ~a ~a ~a, ~2,'0d:~2,'0d:~2,'0d ~:[PM~;AM~]"
+		      (eric:name-of-weekday day-of-week)
+		      (eric:name-of-month month) date
+		      year
+		      (+ (if (= (mod hour 12) 0) 12 0) (mod hour 12))
+		      minute second (< hour 12))))
+    (string deadline)
+    (symbol (format nil "~:(~a~)" deadline))))
+
+(defun print-todo-item (name todo-item)
+  "Print a formatted todo-item, surrounded by dashes."
+  (format t "~%---------- ~(~a~)~%~a~%~a~%Tags: ~{~(~a~)~^, ~}~%~a~%"
+	  name
+	  (eric:[] todo-item 'name)
+	  (display-deadline (eric:[] todo-item 'deadline))
+	  (eric:[] todo-item 'tags)
+	  (eric:[] todo-item 'desc))
+  (format t "----------~%"))
+
+(defun print-todo-file (todo-file)
+  "Load a todo-item from the file named in the argument residing in *ROOT*, and print it."
+  (let ((todo-item (load-todo-item todo-file)))
+    (when todo-item
+      (print-todo-item todo-file todo-item))))
+
+(defun translate-time (timestr)
+  "Translate from a string in the form [+]<number><d/w/m/y> to the number of seconds it indicates."
+  (multiple-value-bind (matched-str matches)
+      (cl-ppcre:scan-to-strings "[+]?(\\d+)([dwmy])" timestr)
+    (if (null matched-str)
+	nil
+	(let* ((amount (parse-integer (aref matches 0)))
+	       (time-period (aref matches 1))
+	       (day (* 60 60 24))
+	       (week (* day 7))
+	       (month (* day 30))
+	       (year (* month 12)))
+	  (* amount (case (read-from-string time-period)
+		      (d day)
+		      (w week)
+		      (m month)
+		      (y year)
+		      (t 1)))))))
+
+(defun lt (number1 number2)
+  "As <, but if either argument is NIL, return NIL instead of erroring"
+  (cond ((null number1) nil)
+	((null number2) nil)
+	(t (< number1 number2))))
+
+(defun todo-list (&key single tags deadline)
+  "Print a list of all items in the To-Do stack. Can be printed with print-todo-item, as just their names, or just names with tags."
+  (let ((todo-list (reverse (eric:read-from-file (place "/list")))))
+    (if deadline
+	(setf
+	 todo-list (remove-if-not
+		    (lambda (ti)
+		      (let ((todo-item
+			     (load-todo-item ti)))
+			(if todo-item
+			    (if (string= deadline "timeless")
+				(not (todo-item-deadline todo-item))
+				(if (null (todo-item-deadline todo-item))
+				    nil
+				    (lt (- (todo-item-deadline todo-item)
+					   (get-universal-time))
+					(translate-time deadline)))))))
+		    todo-list)))
+    (if single (format t "~{~(~a~)~%~}" todo-list)
+	(if tags (dolist (todo-name todo-list)
+		   (let ((todo-item (load-todo-item todo-name)))
+		     (format t "~(~a~): ~s~%" todo-name (todo-item-tags
+							 todo-item))))
+	    (mapcar #'print-todo-file todo-list)))))
+
+(defun clear-file (filespec)
+  "Clears the file identified by filespec, by opening it for writing and then closing it."
+  (eric:fopen (f filespec :w)
+    ()))
+
+(defun parse-todo-item (string)
+  "Parse at least four lines from *STANDARD-INPUT* to create a todo-item. The four lines are not Lisp code."
+  (let ((pieces (eric:split string (format nil "~%") 3)))
+    (let ((name (first pieces))
+	  (deadline (let ((time (translate-time (second pieces))))
+		      (if time (+ (get-universal-time) time) nil)))
+	  (tags (read-from-string (third pieces)))
+	  (desc (format nil "~%~a" (fourth pieces))))
+      (make-todo-item :name name :deadline deadline :tags tags :desc desc))))
+
+(defun todo-push (arg)
+  "Push a new todo-item onto the stack. The argument is used as the name of the item, and parse-todo-item builds the structure itself."
+  (let* ((control-c nil)
+	 (todo-string (with-output-to-string (s)
+			(handler-case (loop (format s "~a~%" (read-line)))
+			  (end-of-file () ())
+			  (sb-sys:interactive-interrupt ()
+			    (setf control-c t)))))
+	 (todo-item (unless control-c (parse-todo-item todo-string)))
+	 (filespec (place (format nil "/~a" arg))))
+    (unless control-c
+      (in-package :cl-user)
+      (eric:overwrite-to-file filespec "~s~%" todo-item)
+      (in-package :todo)
+      (let ((todo-list (eric:read-from-file (place "/list"))))
+	(push (read-from-string arg) todo-list)
+	(eric:overwrite-to-file (place "/list") "~s~%" todo-list)))))
+
+(defun todo-pop (&optional keep)
+  "Pop an item off of the stack, and print it. With the keep option, does not truly perform a pop operation, by leaving the item on the stack."
+  (let* ((todo-list (eric:read-from-file (place "/list")))
+	 (item-name (pop todo-list))
+	 (item (load-todo-item item-name)))
+    (print-todo-item item-name item)
+    (when (not keep)
+      (delete-file (place (format nil "/~(~a~)" item-name)))
+      (eric:overwrite-to-file (place "/list") "~s~%" todo-list))))
+
+(defun splice-list (list n &optional object)
+  "Without object, removes item n from the list and returns it. With object, inserts object into position n in the list and returns the new list."
+  (if object
+      (progn
+	(append (butlast list (- (length list) n)) (list object)
+		(nthcdr n list)))
+      (progn
+	(incf n)
+	(append (butlast list (- (length list) (1- n))) (nthcdr n list)))))
+
+(defun todo-cycle (arg)
+  "Move the top item arg spaces back in the stack."
+  (let ((todo-list (eric:read-from-file (place "/list"))))
+    (eric:overwrite-to-file (place "/list") "~s~%" (eric:insert
+						    (first todo-list)
+						    (rest todo-list)
+						    arg))))
+
+(defun todo-pull (arg)
+  "Pull named item to top of stack."
+  (let* ((todo-list (eric:read-from-file (place "/list")))
+	 (arg-pos (search (list arg) todo-list)))
+    (eric:overwrite-to-file (place "/list") "~s~%" (cons arg (eric:unsert
+							      todo-list
+							      arg-pos)))))
+
+(defun todo-finish (arg)
+  "Remove named item from stack."
+  (todo-pull arg)
+  (todo-pop))
+
+(defun usage (&optional quit)
+  "Print usage information and quit if desired."
+  (let ((tabs 0))
+    (labels ((tabbed-control-string (control-string)
+	       (format nil "~~~at~a" (if (> tabs 0) (* tabs 8) ":")
+		       control-string))
+	     (format-tabbed (destination control-string
+					 &rest format-arguments)
+	       (apply #'format (list* destination
+				      (tabbed-control-string control-string)
+				      format-arguments))))
+      (format-tabbed t "Usage: todo option [more options]~%")
+      (format-tabbed t "options:~%")
+      (incf tabs)
+      (format-tabbed t "list [single/tags] [time] - List entire stack~%")
+      (incf tabs)
+      (format-tabbed t "single - Only list item names~%")
+      (format-tabbed t "tags - Only list item names and tags~%")
+      (format-tabbed t "time - list items within <number> <period>s~%")
+      (decf tabs)
+      (format-tabbed t "show [item] - Show particular named item~%")
+      (format-tabbed t "push [item] - Push item on stack (read from stdin)~%")
+      (format-tabbed t "pop [-n] - Pop from stack (-n only displays, does not remove)~%")
+      (format-tabbed t "cycle [number] - Put top item [number] levels back~%")
+      (format-tabbed t "pull [item] - Pull named item to top of stack.~%")
+      (format-tabbed t "finish [item] - Finish named item (remove from stack).~%")))
+  (if quit (sb-ext:quit)))
+
+(defun main (argv)
+  "Parse command-line arguments into commands and execute."
+  (pop argv)
+  (if argv
+      (case (read-from-string (pop argv))
+	(list
+	 (let ((single (find "single" argv :test #'string=))
+	       (tags (find "tags" argv :test #'string=))
+	       (deadline (car (last argv))))
+	   (if (or (string= deadline "single") (string= deadline "tags"))
+	       (setf deadline nil))
+	   (todo-list :single single :tags tags :deadline deadline)))
+	(show
+	 (print-todo-file (first argv)))
+	(push
+	 (todo-push (first argv)))
+	(pop
+	 (todo-pop (find "-n" argv :test #'string=)))
+	(cycle
+	 (todo-cycle (parse-integer (or (first argv) "1"))))
+	(pull
+	 (todo-pull (read-from-string (first argv))))
+	(finish
+	 (todo-finish (read-from-string (first argv))))
+	(t (usage t)))
+      (usage t))
+  0)
+
+(provide :todo)
+
+(in-package :cl-user)
+
+(defun main (argv)
+  "Allow program to be compiled with save-lisp-and-die."
+  (in-package :todo)
+  (todo:main argv))
+
+(if (string= (first *posix-argv*) "/home/eric/bin/lisp")
+    (main (cdr *posix-argv*)))
