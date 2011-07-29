@@ -172,7 +172,8 @@
 	 (item (load-todo-item item-name)))
     (print-todo-item item-name item)
     (when (not keep)
-      (delete-file (place (format nil "/~(~a~)" item-name)))
+      (handler-case (delete-file (place (format nil "/~(~a~)" item-name)))
+	(sb-impl::simple-file-error () nil))
       (eric:overwrite-to-file (place "/list") "~s~%" todo-list))))
 
 (defun splice-list (list n &optional object)
